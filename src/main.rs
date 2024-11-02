@@ -35,18 +35,18 @@ impl Theme for MyTheme {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let database_url = std::env::args()
+    let db_url = std::env::args()
         .nth(1)
         .unwrap_or(dotenvy::var("DATABASE_URL")?);
 
-    let db_name = database_url.split("/").last().unwrap();
+    let db_name = db_url.split("/").last().unwrap();
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
-        .connect(&database_url)
+        .connect(&db_url)
         .await?;
 
-    println!("Connected to {database_url}");
+    println!("Connected to {db_url}");
 
     let mut history = BasicHistory::new().no_duplicates(true);
     let mut cmd_lines: Vec<String> = vec![];
@@ -67,15 +67,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let input = input.trim().to_lowercase();
 
-        if !input.is_empty() {
-            cmd_lines.push(input.clone());
+        if input.is_empty() {
+            continue;
         }
 
-        if input == "exit" || input == "exit;" {
+        let input_without_semi = if input.ends_with(";") {
+            input[..input.len() - 1].to_string()
+        } else {
+            input
+        };
+        cmd_lines.push(input_without_semi);
+
+        let cmd = cmd_lines.join(" ");
+        cmd_lines.clear();
+
+        if cmd == "exit" {
             break;
-        } else if input.ends_with(";") {
-            let cmd = cmd_lines.join("\n");
-            cmd_lines.clear();
+        } else {
             run_query(&cmd, &pool).await?;
         }
     }
@@ -84,20 +92,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_query(query: &str, pool: &Pool<Postgres>) -> Result<(), Box<dyn std::error::Error>> {
-    let rows = sqlx::query(query).fetch_all(pool).await?;
+    let records = sqlx::query(query).fetch_all(pool).await?;
 
     let mut table = pt::Table::new();
 
-    let headers: Vec<&str> = rows
-        .iter()
-        .next()
+    if records.len() == 0 {
+        println!("(0 rows)");
+        return Ok(());
+    }
+
+    let field_names = records
+        .first()
         .unwrap()
         .columns()
         .iter()
-        .map(|c| c.name())
-        .collect();
+        .map(|c| c.name().to_string());
+    table.add_row(field_names.into());
 
-    table.add_row(headers.into());
+    for record in records {
+        // let cells: Vec<String> = vec![];
+        for column in record.columns() {
+            dbg!(column.type_info());
+            // column.type_info().clone_into(target);
+        }
+        // table.add_row(
+        //     record
+        //         .columns()
+        //         .iter()
+        //         .map(|c| record.get::<&str, &str>(c.name()))
+        //         .into(),
+        // );
+    }
 
     table.printstd();
 
