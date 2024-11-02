@@ -1,8 +1,51 @@
 use dialoguer::{theme::Theme, BasicHistory, Input};
 use prettytable as pt;
-use sqlx::{postgres::PgPoolOptions, Pool};
-use sqlx::{Column, Postgres, Row};
-use std::{fmt, vec};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::fmt;
+
+struct Connection<'a> {
+    url: &'a str,
+    client: reqwest::Client,
+}
+
+impl<'a> Connection<'a> {
+    fn from(url: &'a str) -> Self {
+        Self {
+            url,
+            client: reqwest::Client::new(),
+        }
+    }
+
+    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut map = HashMap::new();
+        map.insert("query", query);
+        map.insert("url", self.url);
+        let resp = self
+            .client
+            .post("http://localhost:9876")
+            .json(&map)
+            .send()
+            .await?;
+        let json_text = resp.text().await?;
+        println!("{json_text:#?}");
+
+        let query_result: QueryResult = serde_json::from_str(&json_text)?;
+        println!("result {query_result:#?}");
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryResult {
+    columns: Vec<QueryResultColumn>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryResultColumn {
+    name: String,
+}
 
 struct MyTheme;
 
@@ -41,10 +84,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db_name = db_url.split("/").last().unwrap();
 
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await?;
+    let conn = Connection::from(&db_url);
+
+    // let pool = sqlx::postgres::PgPoolOptions::new()
+    //     .max_connections(5)
+    //     .connect(&db_url)
+    //     .await?;
 
     println!("Connected to {db_url}");
 
@@ -84,47 +129,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if cmd == "exit" {
             break;
         } else {
-            run_query(&cmd, &pool).await?;
+            run_query(&cmd, &conn).await?;
         }
     }
 
     Ok(())
 }
 
-async fn run_query(query: &str, pool: &Pool<Postgres>) -> Result<(), Box<dyn std::error::Error>> {
-    let records = sqlx::query(query).fetch_all(pool).await?;
+async fn run_query(query: &str, conn: &Connection<'_>) -> Result<(), Box<dyn std::error::Error>> {
+    // let records = sqlx::query(query).fetch_all(conn).await?;
+    let records = conn.execute(query).await?;
 
-    let mut table = pt::Table::new();
+    // let mut table = pt::Table::new();
 
-    if records.len() == 0 {
-        println!("(0 rows)");
-        return Ok(());
-    }
+    // if records.len() == 0 {
+    //     println!("(0 rows)");
+    //     return Ok(());
+    // }
 
-    let field_names = records
-        .first()
-        .unwrap()
-        .columns()
-        .iter()
-        .map(|c| c.name().to_string());
-    table.add_row(field_names.into());
+    // let field_names = records
+    //     .first()
+    //     .unwrap()
+    //     .columns()
+    //     .iter()
+    //     .map(|c| c.name().to_string());
+    // table.add_row(field_names.into());
 
-    for record in records {
-        // let cells: Vec<String> = vec![];
-        for column in record.columns() {
-            dbg!(column.type_info());
-            // column.type_info().clone_into(target);
-        }
-        // table.add_row(
-        //     record
-        //         .columns()
-        //         .iter()
-        //         .map(|c| record.get::<&str, &str>(c.name()))
-        //         .into(),
-        // );
-    }
+    // for record in records {
+    //     // let cells: Vec<String> = vec![];
+    //     for column in record.columns() {
+    //         dbg!(column.type_info());
+    //         // column.type_info().clone_into(target);
+    //     }
+    // }
 
-    table.printstd();
+    // table.printstd();
 
     Ok(())
 }

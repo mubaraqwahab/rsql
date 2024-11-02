@@ -9,8 +9,8 @@ app.use(express.json())
 app.post("/", async (req, res) => {
   const { url, query } = req.body
   const sql = postgres(url)
-  const results = await sql.unsafe(query)
-  res.json({ results, columns: results.columns })
+  const rows = await sql.unsafe(query)
+  res.json({ rows, columns: rows.columns })
 })
 
 app.listen(port, () => {
