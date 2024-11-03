@@ -8,9 +8,14 @@ app.use(express.json())
 
 app.post("/", async (req, res) => {
   const { url, query } = req.body
-  const sql = postgres(url)
-  const rows = await sql.unsafe(query)
-  res.json({ rows, columns: rows.columns })
+  try {
+    const sql = postgres(url)
+    const rows = await sql.unsafe(query)
+    res.json({ rows, columns: rows.columns })
+  } catch (e) {
+    res.status(400)
+    res.json({ error: String(e) })
+  }
 })
 
 app.listen(port, () => {

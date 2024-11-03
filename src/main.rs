@@ -1,5 +1,6 @@
 use dialoguer::{theme::Theme, BasicHistory, Input};
 use prettytable as pt;
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
@@ -10,35 +11,33 @@ struct Connection<'a> {
 }
 
 impl<'a> Connection<'a> {
-    fn from(url: &'a str) -> Self {
+    fn new(url: &'a str) -> Self {
         Self {
             url,
             client: reqwest::Client::new(),
         }
     }
 
-    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute(&self, query: &str) -> Result<QueryResult, Box<dyn std::error::Error>> {
         let mut map = HashMap::new();
         map.insert("query", query);
         map.insert("url", self.url);
+
         let resp = self
             .client
             .post("http://localhost:9876")
             .json(&map)
             .send()
             .await?;
-        let json_text = resp.text().await?;
-        println!("{json_text:#?}");
 
-        let query_result: QueryResult = serde_json::from_str(&json_text)?;
-        println!("result {query_result:#?}");
-
-        Ok(())
+        let query_result: QueryResult = resp.json().await?;
+        Ok(query_result)
     }
 }
 
 #[derive(Debug, Deserialize)]
 struct QueryResult {
+    rows: Vec<HashMap<String, serde_json::Value>>,
     columns: Vec<QueryResultColumn>,
 }
 
@@ -81,23 +80,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::args()
         .nth(1)
         .unwrap_or(dotenvy::var("DATABASE_URL")?);
-
     let db_name = db_url.split("/").last().unwrap();
 
-    let conn = Connection::from(&db_url);
-
-    // let pool = sqlx::postgres::PgPoolOptions::new()
-    //     .max_connections(5)
-    //     .connect(&db_url)
-    //     .await?;
-
-    println!("Connected to {db_url}");
+    let conn = Connection::new(&db_url);
+    println!("Connected to database {db_name}");
 
     let mut history = BasicHistory::new().no_duplicates(true);
     let mut cmd_lines: Vec<String> = vec![];
 
+    let exit_cmd_re = Regex::new(r"^exit\s*;*$").unwrap();
+    let trailing_semi_re = Regex::new(";*$").unwrap();
+
     loop {
-        let prompt = if cmd_lines.len() == 0 {
+        let prompt = if cmd_lines.is_empty() {
             db_name.to_string() + "=#"
         } else {
             db_name.to_string() + "-#"
@@ -114,22 +109,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if input.is_empty() {
             continue;
-        }
-
-        let input_without_semi = if input.ends_with(";") {
-            input[..input.len() - 1].to_string()
-        } else {
-            input
-        };
-        cmd_lines.push(input_without_semi);
-
-        let cmd = cmd_lines.join(" ");
-        cmd_lines.clear();
-
-        if cmd == "exit" {
+        } else if exit_cmd_re.is_match(&input) {
             break;
+        } else if input.ends_with(";") {
+            let input_without_semi = trailing_semi_re.replace(&input, "").into_owned();
+            cmd_lines.push(input_without_semi);
+
+            let cmd = cmd_lines.join(" ");
+            cmd_lines.clear();
+
+            let _ = run_query(&cmd, &conn)
+                .await
+                .inspect_err(|e| eprintln!("failed to execute query {e:?}"));
         } else {
-            run_query(&cmd, &conn).await?;
+            cmd_lines.push(input);
         }
     }
 
@@ -137,33 +130,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_query(query: &str, conn: &Connection<'_>) -> Result<(), Box<dyn std::error::Error>> {
-    // let records = sqlx::query(query).fetch_all(conn).await?;
-    let records = conn.execute(query).await?;
+    let QueryResult { rows, columns } = conn.execute(query).await?;
 
-    // let mut table = pt::Table::new();
+    if columns.is_empty() {
+        return Ok(());
+    }
 
-    // if records.len() == 0 {
-    //     println!("(0 rows)");
-    //     return Ok(());
-    // }
+    let mut table = pt::Table::new();
+    table.set_format(*pt::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
 
-    // let field_names = records
-    //     .first()
-    //     .unwrap()
-    //     .columns()
-    //     .iter()
-    //     .map(|c| c.name().to_string());
-    // table.add_row(field_names.into());
+    let column_names: Vec<&String> = columns.iter().map(|c| &c.name).collect();
+    table.set_titles(column_names.iter().into());
 
-    // for record in records {
-    //     // let cells: Vec<String> = vec![];
-    //     for column in record.columns() {
-    //         dbg!(column.type_info());
-    //         // column.type_info().clone_into(target);
-    //     }
-    // }
+    for row in &rows {
+        table.add_row(
+            column_names
+                .iter()
+                .map(|&c| match row.get(c).unwrap() {
+                    serde_json::Value::String(v) => v.clone(),
+                    serde_json::Value::Number(v) => v.to_string(),
+                    serde_json::Value::Bool(v) => v.to_string(),
+                    serde_json::Value::Null => String::from(""),
+                    v => panic!("Failed to parse json value {}", v),
+                })
+                .into(),
+        );
+    }
 
-    // table.printstd();
+    table.printstd();
+    println!("({} rows)", rows.len());
 
     Ok(())
 }
