@@ -4,13 +4,13 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
 
-pub struct Connection<'a> {
+pub struct DbConnection<'a> {
     url: &'a str,
     client: reqwest::Client,
 }
 
-impl<'a> Connection<'a> {
-    pub fn new(url: &'a str) -> Self {
+impl<'a> DbConnection<'a> {
+    pub fn bind(url: &'a str) -> Self {
         Self {
             url,
             client: reqwest::Client::new(),
@@ -76,7 +76,7 @@ impl Theme for CliTheme {
 
 pub async fn run_query(
     query: &str,
-    conn: &Connection<'_>,
+    conn: &DbConnection<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let QueryResult { rows, columns } = conn.execute(query).await?;
 

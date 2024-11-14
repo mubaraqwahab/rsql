@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(dotenvy::var("DATABASE_URL")?);
     let db_name = db_url.split("/").last().unwrap();
 
-    let conn = Connection::new(&db_url);
+    let conn = DbConnection::bind(&db_url);
     println!("Connected to database {db_name}");
 
     let mut history = BasicHistory::new().no_duplicates(true);
