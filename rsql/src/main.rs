@@ -1,8 +1,6 @@
-mod cli_utils;
-
-use crate::cli_utils::*;
 use dialoguer::{BasicHistory, Input};
 use regex::Regex;
+use rsql::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

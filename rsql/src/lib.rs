@@ -18,6 +18,8 @@ impl<'a> DbConnection<'a> {
     }
 
     pub async fn execute(&self, query: &str) -> Result<QueryResult, Box<dyn std::error::Error>> {
+        // TODO: connect to the actual HTTP server
+
         let mut map = HashMap::new();
         map.insert("query", query);
         map.insert("url", self.url);
