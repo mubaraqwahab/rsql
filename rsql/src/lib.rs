@@ -18,11 +18,9 @@ impl<'a> DbConnection<'a> {
     }
 
     pub async fn execute(&self, query: &str) -> Result<QueryResult, Box<dyn std::error::Error>> {
-        // TODO: connect to the actual HTTP server
-
         let mut map = HashMap::new();
-        map.insert("query", query);
         map.insert("url", self.url);
+        map.insert("query", query);
 
         let resp = self
             .client
@@ -39,12 +37,13 @@ impl<'a> DbConnection<'a> {
 #[derive(Debug, Deserialize)]
 pub struct QueryResult {
     rows: Vec<HashMap<String, serde_json::Value>>,
-    columns: Vec<QueryResultColumn>,
+    cols: Vec<QueryResultColumn>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct QueryResultColumn {
     name: String,
+    r#type: String,
 }
 
 pub struct CliTheme;
@@ -80,7 +79,10 @@ pub async fn run_query(
     query: &str,
     conn: &DbConnection<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let QueryResult { rows, columns } = conn.execute(query).await?;
+    let QueryResult {
+        rows,
+        cols: columns,
+    } = conn.execute(query).await?;
 
     if columns.is_empty() {
         return Ok(());
