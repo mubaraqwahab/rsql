@@ -4,12 +4,12 @@ use rsql::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_url = std::env::args()
+    let db_name = std::env::args()
         .nth(1)
-        .unwrap_or(dotenvy::var("DATABASE_URL")?);
-    let db_name = db_url.split("/").last().unwrap();
+        .expect("no database argument specified.");
 
-    let conn = DbConnection::bind(&db_url);
+    let conn =
+        DbConnection::bind(&db_name).expect(&format!("failed to connect to database {db_name}"));
     println!("Connected to database {db_name}");
 
     let mut history = BasicHistory::new().no_duplicates(true);
@@ -45,9 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cmd = cmd_lines.join(" ");
             cmd_lines.clear();
 
-            let _ = run_query(&cmd, &conn)
-                .await
-                .inspect_err(|e| eprintln!("failed to execute query {e:?}"));
+            match conn.execute(&cmd).await {
+                Ok(result) => result.print(),
+                Err(e) => eprintln!("failed to execute query {e:?}"),
+            }
         } else {
             cmd_lines.push(input);
         }

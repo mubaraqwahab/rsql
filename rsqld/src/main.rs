@@ -1,4 +1,4 @@
-use axum::{http::StatusCode, routing::post, Json, Router};
+use axum::{extract::Path, http::StatusCode, routing::post, Json, Router};
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -7,18 +7,48 @@ use tokio_postgres::types::Type;
 
 #[derive(Deserialize)]
 struct Payload {
-    url: String,
-    query: String,
+    stmt: String,
 }
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/", post(handle_request));
+    let app = Router::new().route("/:db_name", post(handle_request));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:9876")
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn handle_request(
+    Path(db_name): Path<String>,
+    Json(payload): Json<Payload>,
+) -> (StatusCode, Json<Value>) {
+    // TODO: Change this to actually run the query against an rsql database
+    let db_url = format!("postgres://postgres:postgres@localhost/{}", db_name);
+    let (client, connection) = tokio_postgres::connect(&db_url, tokio_postgres::NoTls)
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection failed {}", e);
+        } else {
+            println!("Connected to {}", db_url);
+        }
+    });
+
+    let stmt = client.prepare(&payload.stmt).await.unwrap();
+    let cols: Vec<_> = stmt.columns().iter().map(col_to_json).collect();
+    let rows: Vec<_> = client
+        .query(&stmt, &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(row_to_json)
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "cols": cols, "rows": rows })))
 }
 
 fn col_to_json(col: &tokio_postgres::Column) -> Value {
@@ -48,29 +78,4 @@ fn row_to_json(row: &tokio_postgres::Row) -> Value {
     }
 
     json!(map)
-}
-
-async fn handle_request(Json(payload): Json<Payload>) -> (StatusCode, Json<Value>) {
-    let Payload { url, query } = payload;
-    let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
-        .await
-        .unwrap();
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
-        }
-    });
-
-    let stmt = client.prepare(&query).await.unwrap();
-    let cols: Vec<_> = stmt.columns().iter().map(col_to_json).collect();
-    let rows: Vec<_> = client
-        .query(&stmt, &[])
-        .await
-        .unwrap()
-        .iter()
-        .map(row_to_json)
-        .collect();
-
-    (StatusCode::OK, Json(json!({ "cols": cols, "rows": rows })))
 }
