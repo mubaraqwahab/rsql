@@ -1,2 +1,2 @@
-pub mod file_mgr;
+pub mod file;
 pub mod server;

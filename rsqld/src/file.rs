@@ -76,8 +76,27 @@ impl<'a> FileMgr<'a> {
         file.sync_all().unwrap();
     }
 
+    // TODO: make this "synchronized" a la java
+    fn append(&self, filename: &'a str) -> BlockId<'a> {
+        let block = BlockId {
+            filename,
+            // TODO: I don't get this
+            block_num: self.length(filename),
+        };
+
+        let mut file = File::options().write(true).open(block.filename).unwrap();
+        let offset = (block.block_num * self.block_size) as u64;
+        file.seek(SeekFrom::Start(offset)).unwrap();
+
+        let bytes = Vec::with_capacity(self.block_size).into_boxed_slice();
+        file.write(&bytes).unwrap();
+        file.sync_all().unwrap();
+
+        block
+    }
+
     fn length(&self, filename: &str) -> usize {
-        let file = File::open(block.filename).unwrap();
-        file.metadata().unwrap().len()
+        let file = File::open(filename).unwrap();
+        file.metadata().unwrap().len() as usize / self.block_size
     }
 }
