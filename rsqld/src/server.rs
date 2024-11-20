@@ -31,7 +31,7 @@ async fn handle_request(
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection failed {}", e);
+            eprintln!("failed to connect to {}: {}", db_url, e);
         } else {
             println!("Connected to {}", db_url);
         }
@@ -63,7 +63,9 @@ fn row_to_json(row: &tokio_postgres::Row) -> Value {
     for col in row.columns() {
         let idx = col.name();
         let value = match *col.type_() {
-            Type::INT2 | Type::INT4 | Type::INT8 => json!(row.get::<_, i64>(idx)),
+            Type::INT2 => json!(row.get::<_, i16>(idx)),
+            Type::INT4 => json!(row.get::<_, i32>(idx)),
+            Type::INT8 => json!(row.get::<_, i64>(idx)),
             Type::FLOAT4 | Type::FLOAT8 => json!(row.get::<_, f64>(idx)),
             Type::BOOL => json!(row.get::<_, bool>(idx)),
             Type::TIMESTAMP => {

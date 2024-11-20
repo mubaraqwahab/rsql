@@ -1,16 +1,27 @@
+use clap::Parser;
 use dialoguer::{BasicHistory, Input};
 use regex::Regex;
 use rsql::*;
 
+/// The interactive terminal for the rsql database system.
+#[derive(Parser)]
+#[command(version)]
+struct Args {
+    /// The name of the database to connect to
+    db_name: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_name = std::env::args()
-        .nth(1)
-        .expect("no database argument specified.");
+    let args = Args::parse();
+    let db_name = args.db_name;
 
+    // TODO: if the rsqld server is unreachable, terminate here.
     let conn =
         DbConnection::bind(&db_name).expect(&format!("failed to connect to database {db_name}"));
-    println!("Connected to database {db_name}");
+
+    let pkg_version = env!("CARGO_PKG_VERSION");
+    println!("rsql {}\n", pkg_version);
 
     let mut history = BasicHistory::new().no_duplicates(true);
     let mut cmd_lines: Vec<String> = vec![];
