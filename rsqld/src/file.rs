@@ -3,41 +3,48 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+pub const BLOCK_SIZE: usize = 4096;
+
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct BlockId<'a> {
-    filename: &'a str,
-    block_num: usize,
+pub struct Block<'a> {
+    pub filename: &'a str,
+    pub num: usize,
 }
 
-struct Page {
-    buffer: Box<[u8]>,
-}
-
-impl Page {
-    fn new(size: usize) -> Self {
-        Self {
-            buffer: Vec::with_capacity(size).into_boxed_slice(),
-        }
+impl Block<'_> {
+    // TODO: make this "synchronized" a la java
+    pub fn read(&self, page: &mut Page) {
+        let offset = (self.num * BLOCK_SIZE) as u64;
+        let mut file = File::open(self.filename).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.read(&mut page.buffer).unwrap();
     }
+
+    // TODO: make this "synchronized" a la java
+    pub fn write(&mut self, page: &Page) {
+        let offset = (self.num * BLOCK_SIZE) as u64;
+        let mut file = File::options().write(true).open(self.filename).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+
+        file.write(&page.buffer).unwrap();
+        file.sync_all().unwrap();
+    }
+
+    // TODO: consider adding a new(filename) function that's equivalent to fm.append(filename)
 }
 
-impl From<&[u8]> for Page {
-    fn from(value: &[u8]) -> Self {
-        Self {
-            buffer: Box::from(value),
-        }
-    }
+pub struct Page {
+    buffer: [u8; BLOCK_SIZE],
 }
 
 #[derive(Debug)]
-struct FileMgr<'a> {
+pub struct FileMgr<'a> {
     dir: &'a Path,
-    block_size: usize,
     open_files: HashMap<&'a str, File>,
 }
 
 impl<'a> FileMgr<'a> {
-    fn new(dir: &'a Path, block_size: usize) -> Self {
+    pub fn new(dir: &'a Path) -> Self {
         fs::create_dir_all(dir).unwrap();
 
         // Remove any leftover temp files
@@ -50,52 +57,30 @@ impl<'a> FileMgr<'a> {
 
         Self {
             dir,
-            block_size,
             open_files: HashMap::new(),
         }
     }
 
     // TODO: make this "synchronized" a la java
-    fn read(&self, block: &BlockId, page: &mut Page) {
-        let mut file = File::open(block.filename).unwrap();
-
-        let offset = (block.block_num * self.block_size) as u64;
-        file.seek(SeekFrom::Start(offset)).unwrap();
-
-        file.read(&mut page.buffer).unwrap();
-    }
-
-    // TODO: make this "synchronized" a la java
-    fn write(&self, block: &BlockId, page: &Page) {
-        let mut file = File::options().write(true).open(block.filename).unwrap();
-
-        let offset = (block.block_num * self.block_size) as u64;
-        file.seek(SeekFrom::Start(offset)).unwrap();
-
-        file.write(&page.buffer).unwrap();
-        file.sync_all().unwrap();
-    }
-
-    // TODO: make this "synchronized" a la java
-    fn append(&self, filename: &'a str) -> BlockId<'a> {
-        let block = BlockId {
+    pub fn append(&self, filename: &'a str) -> Block<'a> {
+        let block = Block {
             filename,
-            // TODO: I don't get this
-            block_num: self.length(filename),
+            num: self.length(filename),
         };
 
         let mut file = File::options().write(true).open(block.filename).unwrap();
-        let offset = (block.block_num * self.block_size) as u64;
+        let offset = (block.num * BLOCK_SIZE) as u64;
         file.seek(SeekFrom::Start(offset)).unwrap();
 
-        let bytes = Vec::with_capacity(self.block_size).into_boxed_slice();
+        let bytes = Vec::with_capacity(BLOCK_SIZE).into_boxed_slice();
         file.write(&bytes).unwrap();
         file.sync_all().unwrap();
 
         block
     }
 
-    fn length(&self, filename: &str) -> usize {
+    /// Return the number of blocks that comprise a file.
+    pub fn length(&self, filename: &str) -> usize {
         let file = File::open(filename).unwrap();
         file.metadata().unwrap().len() as usize / self.block_size
     }
